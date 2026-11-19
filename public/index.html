@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Secret Santa</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎅</text></svg>">
+<style>
+:root{--bg:#fbf6ee;--card:#fff;--ink:#2a2220;--mute:#7a6c66;--red:#c8312b;--green:#1f6b4a;--line:#eadfd2;--chip:#f3e9dc}
+@media(prefers-color-scheme:dark){:root{--bg:#1a1514;--card:#262020;--ink:#f4ece6;--mute:#b3a59e;--red:#e5534d;--green:#4cae82;--line:#3a3130;--chip:#352c2b}}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 40px}
+main{max-width:520px;margin:0 auto}
+h1{margin:4px 0 2px;font-size:28px}.sub{color:var(--mute);margin:0 0 14px}
+.min{background:var(--red);color:#fff;border-radius:12px;padding:12px 14px;font-weight:600;text-align:center;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+h2{font-size:17px;margin:0 0 10px}
+input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:var(--bg);color:var(--ink);margin-bottom:10px}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 16px;background:var(--green);color:#fff;width:100%;cursor:pointer;margin-bottom:8px}
+button.alt{background:var(--chip);color:var(--ink)}button:disabled{opacity:.5}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:var(--chip);border-radius:999px;padding:6px 12px;font-size:15px}
+.msg{min-height:20px;font-size:14px;color:var(--red);margin:0 0 8px}.ok{color:var(--green)}
+.reveal{text-align:center;padding:18px 8px}.big{font-size:32px;font-weight:700;color:var(--red);margin:6px 0}
+.note{font-size:13px;color:var(--mute)}.row{display:flex;gap:8px}.row button{width:auto}
+details{margin-top:6px}summary{cursor:pointer;color:var(--mute);font-size:14px;margin-bottom:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>🎅 Secret Santa</h1>
+<p class="sub">Add your nickname, wait for the draw, then surprise your match.</p>
+<div class="min">🎁 Minimum gift: Sh 1,500</div>
+<div id="app"></div>
+</main>
+<script>
+(function(){
+var S={players:[],drawn:false,drawAt:null,ready:false},skew=0,revealed=null,revGender=null,msg='',ok=false,adminKey='',isAdmin=false;
+try{adminKey=sessionStorage.getItem('ss-key')||''}catch(e){}
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function me(){try{return localStorage.getItem('ss-me')||''}catch(e){return ''}}
+function now(){return Date.now()+skew}
+function fmt(t){return new Date(t).toLocaleString([],{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+function left(t){var s=Math.max(0,Math.floor((t-now())/1000)),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+'d ':'')+h+'h '+m+'m'}
+function dtval(){if(!S.drawAt)return'';return new Date(S.drawAt-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)}
+function say(t,g){msg=t;ok=!!g;var m=$('msg');if(m){m.textContent=t;m.className='msg'+(g?' ok':'')}}
+async function api(p,body){
+  try{var r=await fetch('/api/'+p,{method:body?'POST':'GET',headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+    var d=await r.json();if(!r.ok)throw new Error(d.error||'Something went wrong');return d}
+  catch(e){throw new Error(e.message||'Network problem')}
+}
+async function load(){try{var d=await api('state');skew=d.now-Date.now();S=d;if(!typing())render()}catch(e){}}
+function typing(){var a=document.activeElement;return a&&/^(nick|gender|pin|rpin|who|dt|key)$/.test(a.id)}
+function render(){
+  var h='';
+  if(S.ready&&!revealed)h+='<div class="min" style="background:var(--green)">🔔 Draw day! Your match is ready. Enter your PIN below.</div>';
+  if(revealed)h+='<div class="card reveal"><div>You are the Secret Santa for</div><div class="big">'+esc(revealed)+'</div>'+(revGender?'<div class="note">Gender: '+esc(revGender)+' (to help you pick a gift)</div>':'')+'<p>Gift them something thoughtful worth <b>at least Sh 1,500</b>. Keep it secret! 🤫</p><button class="alt" id="hide">Hide</button></div>';
+  if(!S.drawn)h+='<div class="card"><h2>Join the draw</h2><input id="nick" maxlength="20" placeholder="Your nickname" autocomplete="off"><select id="gender"><option value="">Select your gender</option><option>Male</option><option>Female</option></select><input id="pin" inputmode="numeric" maxlength="4" placeholder="Choose a 4-digit PIN" autocomplete="off"><p class="msg'+(ok?' ok':'')+'" id="msg">'+esc(msg)+'</p><button id="joinBtn">Add me</button><p class="note">Your PIN keeps your match private. No email needed.</p></div>';
+  h+='<div class="card"><h2>Participants ('+S.players.length+')</h2>'+(S.players.length?'<div class="chips">'+S.players.map(function(n){return'<span class="chip">'+esc(n)+'</span>'}).join('')+'</div>':'<p class="note">Nobody has joined yet.</p>');
+  if(!S.drawn)h+='<p class="note">'+(S.drawAt?'The draw is on <b>'+fmt(S.drawAt)+'</b> ('+left(S.drawAt)+' to go). Your match will show up here then.':'The organiser will run the draw when everyone has joined.')+'</p>';
+  h+='</div>';
+  if(S.drawn&&!S.ready)h+='<div class="card reveal"><h2>🎄 Names are drawn!</h2><p>Matches unlock on <b>'+fmt(S.drawAt)+'</b></p><div class="big">'+left(S.drawAt)+'</div><p class="note">Come back then and enter your PIN.</p></div>';
+  if(S.ready)h+='<div class="card"><h2>🎉 See your match</h2><select id="who"><option value="">Pick your nickname</option>'+S.players.map(function(n){return'<option'+(n===me()?' selected':'')+'>'+esc(n)+'</option>'}).join('')+'</select><input id="rpin" inputmode="numeric" maxlength="4" placeholder="Your 4-digit PIN"><p class="msg" id="msg">'+esc(msg)+'</p><button id="showBtn">Show my match</button></div>';
+  h+='<details'+(isAdmin?' open':'')+'><summary>Organiser tools</summary>';
+  if(!isAdmin)h+='<div class="card"><input id="key" type="password" placeholder="Organiser password"><button class="alt" id="keyBtn">Unlock</button><p class="msg" id="msg2"></p></div>';
+  else{
+    h+='<div class="card"><label class="note">Draw date &amp; time (matches unlock then)</label><div class="row"><input type="datetime-local" id="dt" value="'+dtval()+'"><button class="alt" id="dateBtn">Save</button></div>';
+    if(!S.drawn)h+='<button id="drawBtn"'+(S.players.length<3?' disabled':'')+'>🎲 Draw names</button><p class="note">Needs at least 3 people. Closes sign-ups.</p>';
+    h+='<button class="alt" id="resetBtn">Start over</button><p class="msg" id="msg2"></p></div>';
+  }
+  h+='</details>';
+  $('app').innerHTML=h;
+  var b;
+  if(b=$('joinBtn'))b.onclick=join;if(b=$('showBtn'))b.onclick=show;if(b=$('hide'))b.onclick=function(){revealed=null;render()};
+  if(b=$('keyBtn'))b.onclick=unlock;if(b=$('dateBtn'))b.onclick=saveDate;if(b=$('drawBtn'))b.onclick=draw;if(b=$('resetBtn'))b.onclick=reset;
+}
+function am(t,g){var m=$('msg2');if(m){m.textContent=t;m.className='msg'+(g?' ok':'')}}
+async function join(){
+  var nick=$('nick').value.trim(),pin=$('pin').value.trim();$('joinBtn').disabled=true;
+  try{await api('join',{nick:nick,gender:$('gender').value,pin:pin});try{localStorage.setItem('ss-me',nick)}catch(e){}msg='You’re in, '+nick+'! Remember your PIN.';ok=true;await load();render()}
+  catch(e){say(e.message);$('joinBtn').disabled=false}
+}
+async function show(){
+  var nick=$('who').value,pin=$('rpin').value.trim();if(!nick||!pin)return say('Pick your nickname and enter your PIN.');
+  try{var d=await api('reveal',{nick:nick,pin:pin});try{localStorage.setItem('ss-me',nick)}catch(e){}revealed=d.match;revGender=d.gender;msg='';render()}catch(e){say(e.message)}
+}
+async function unlock(){
+  var k=$('key').value;try{await api('admin-check',{key:k});adminKey=k;isAdmin=true;try{sessionStorage.setItem('ss-key',k)}catch(e){}render()}catch(e){am(e.message)}
+}
+async function saveDate(){
+  var v=$('dt').value;try{await api('config',{key:adminKey,drawAt:v?new Date(v).getTime():null});await load();render();am('Draw date saved.',true)}catch(e){am(e.message)}
+}
+async function draw(){try{await api('draw',{key:adminKey});await load();render()}catch(e){am(e.message)}}
+async function reset(){if(!confirm('Clear everyone and the draw? This cannot be undone.'))return;try{await api('reset',{key:adminKey});revealed=null;await load();render()}catch(e){am(e.message)}}
+if(adminKey)api('admin-check',{key:adminKey}).then(function(){isAdmin=true;render()},function(){});
+render();load();setInterval(load,20000);
+})();
+</script>
+</body>
+</html>
